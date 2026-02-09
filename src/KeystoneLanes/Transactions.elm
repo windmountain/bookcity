@@ -1,13 +1,6 @@
-module KeystoneLanes.Transactions exposing (Transaction, transactions)
+module KeystoneLanes.Transactions exposing (transactions)
 
-
-type alias Transaction =
-    { date : String
-    , description : String
-    , debitAccount : Int
-    , creditAccount : Int
-    , amount : Int -- cents
-    }
+import Transaction exposing (Transaction)
 
 
 transactions : List Transaction

@@ -1,14 +1,28 @@
 port module Main exposing (main)
 
+import Account exposing (Account, AccountType(..))
+import AptPhotography.ChartOfAccounts as APC
+import AptPhotography.Transactions as APT
 import Browser
 import Dict exposing (Dict)
+import FaithfulVet.ChartOfAccounts as FVC
+import FaithfulVet.Transactions as FVT
 import Html exposing (Html, button, div, footer, h1, h2, header, input, label, main_, optgroup, option, p, select, small, span, text)
 import Html.Attributes exposing (attribute, class, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Json.Decode as Decode
 import Json.Encode as Encode
-import KeystoneLanes.ChartOfAccounts as KLA exposing (Account, AccountType(..))
-import KeystoneLanes.Transactions as KLT exposing (Transaction)
+import KeystoneLanes.ChartOfAccounts as KLC
+import KeystoneLanes.Transactions as KLT
+import SoundFitness.ChartOfAccounts as SFC
+import SoundFitness.Transactions as SFT
+import SterlingBakery.ChartOfAccounts as SBC
+import SterlingBakery.Transactions as SBT
+import Transaction exposing (Transaction)
+import TruelineAuto.ChartOfAccounts as TAC
+import TruelineAuto.Transactions as TAT
+import UprightLandscaping.ChartOfAccounts as ULC
+import UprightLandscaping.Transactions as ULT
 
 
 port saveAnswer : Encode.Value -> Cmd msg
@@ -29,8 +43,38 @@ businesses : List Business
 businesses =
     [ { id = "keystone-lanes"
       , name = "Keystone Lanes"
-      , accounts = KLA.accounts
+      , accounts = KLC.accounts
       , transactions = KLT.transactions
+      }
+    , { id = "sterling-bakery"
+      , name = "Sterling Bakery"
+      , accounts = SBC.accounts
+      , transactions = SBT.transactions
+      }
+    , { id = "faithful-vet"
+      , name = "Faithful Veterinary Clinic"
+      , accounts = FVC.accounts
+      , transactions = FVT.transactions
+      }
+    , { id = "sound-fitness"
+      , name = "Sound Fitness"
+      , accounts = SFC.accounts
+      , transactions = SFT.transactions
+      }
+    , { id = "upright-landscaping"
+      , name = "Upright Landscaping"
+      , accounts = ULC.accounts
+      , transactions = ULT.transactions
+      }
+    , { id = "trueline-auto"
+      , name = "Trueline Auto"
+      , accounts = TAC.accounts
+      , transactions = TAT.transactions
+      }
+    , { id = "apt-photography"
+      , name = "Apt Photography"
+      , accounts = APC.accounts
+      , transactions = APT.transactions
       }
     ]
 
@@ -127,11 +171,15 @@ decodeFlags flags =
 startBusiness : Business -> Dict String SavedAnswer -> Model
 startBusiness business saved =
     let
+        remaining =
+            business.transactions
+                |> List.filter (\txn -> not (Dict.member (txnKey business txn) saved))
+
         fields =
-            prefill business business.transactions saved
+            prefill business remaining saved
     in
     { page = Playing business
-    , remaining = business.transactions
+    , remaining = remaining
     , selectedDebit = fields.debit
     , selectedCredit = fields.credit
     , enteredAmount = fields.amount
@@ -432,41 +480,59 @@ accountSelect accts lbl toMsg current =
 progressBar : Business -> Model -> Html Msg
 progressBar business model =
     let
-        txnCount =
+        total =
             List.length business.transactions
 
-        done =
-            txnCount - List.length model.remaining
+        current =
+            total - List.length model.remaining + 1
     in
     small [ class "progress" ]
-        [ text (String.fromInt (done + 1) ++ " / " ++ String.fromInt txnCount) ]
+        [ text (String.fromInt current ++ " / " ++ String.fromInt total) ]
 
 
 view : Model -> Html Msg
 view model =
     case model.page of
         ChoosingBusiness ->
-            viewBusinessList
+            viewBusinessList model.saved
 
         Playing business ->
             viewGame business model
 
 
-viewBusinessList : Html Msg
-viewBusinessList =
+viewBusinessList : Dict String SavedAnswer -> Html Msg
+viewBusinessList saved =
     div [ class "container" ]
         [ header []
             [ h1 [ class "title" ] [ text "Journal Entry Practice" ] ]
         , main_ []
-            (List.map viewBusinessCard businesses)
+            (List.map (viewBusinessCard saved) businesses)
+        , footer []
+            [ button [ class "btn btn-clear", onClick ClearAll ] [ text "Clear Correct Answers" ]
+            ]
         ]
 
 
-viewBusinessCard : Business -> Html Msg
-viewBusinessCard business =
+viewBusinessCard : Dict String SavedAnswer -> Business -> Html Msg
+viewBusinessCard saved business =
+    let
+        completed =
+            business.transactions
+                |> List.filter (\txn -> Dict.member (txnKey business txn) saved)
+                |> List.length
+
+        total =
+            List.length business.transactions
+    in
     button [ class "card business-card", onClick (ChooseBusiness business) ]
         [ h2 [] [ text business.name ]
-        , small [] [ text (String.fromInt (List.length business.transactions) ++ " transactions") ]
+        , small []
+            [ text
+                (String.fromInt completed
+                    ++ " / "
+                    ++ String.fromInt total
+                )
+            ]
         ]
 
 
@@ -564,9 +630,6 @@ viewGame business model =
                                     , button [ class "btn", onClick Next ] [ text "Next" ]
                                     ]
                         ]
-            ]
-        , footer []
-            [ button [ class "btn btn-secondary", onClick ClearAll ] [ text "Clear Correct Answers" ]
             ]
         ]
 

@@ -1,20 +1,6 @@
-module KeystoneLanes.ChartOfAccounts exposing (Account, AccountType(..), accounts)
+module KeystoneLanes.ChartOfAccounts exposing (accounts)
 
-
-type AccountType
-    = Asset
-    | ContraAsset
-    | Liability
-    | Equity
-    | Revenue
-    | Expense
-
-
-type alias Account =
-    { number : Int
-    , name : String
-    , accountType : AccountType
-    }
+import Account exposing (Account, AccountType(..))
 
 
 accounts : List Account
