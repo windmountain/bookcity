@@ -1,0 +1,2 @@
+Remove dist/ from repo, make a release script
+
