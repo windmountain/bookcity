@@ -1,10 +1,10 @@
 port module Main exposing (main)
 
 import Browser
-import ChartOfAccounts exposing (Account, accounts)
+import ChartOfAccounts exposing (Account, AccountType(..), accounts)
 import Dict exposing (Dict)
-import Html exposing (Html, button, div, h2, input, label, option, p, select, text)
-import Html.Attributes exposing (selected, type_, value)
+import Html exposing (Html, button, div, h1, h2, input, label, optgroup, option, p, select, small, span, text)
+import Html.Attributes exposing (attribute, class, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Json.Decode as Decode
 import Json.Encode as Encode
@@ -258,6 +258,49 @@ formatCents cents =
         ++ String.padLeft 2 '0' (String.fromInt remainder)
 
 
+accountTypeName : AccountType -> String
+accountTypeName t =
+    case t of
+        Asset ->
+            "Assets"
+
+        ContraAsset ->
+            "Contra Assets"
+
+        Liability ->
+            "Liabilities"
+
+        Equity ->
+            "Owner's Equity"
+
+        Revenue ->
+            "Revenue"
+
+        Expense ->
+            "Expenses"
+
+
+accountGroups : List ( AccountType, List Account )
+accountGroups =
+    let
+        types =
+            [ Asset, ContraAsset, Liability, Equity, Revenue, Expense ]
+    in
+    List.filterMap
+        (\t ->
+            let
+                matching =
+                    List.filter (\a -> a.accountType == t) accounts
+            in
+            if List.isEmpty matching then
+                Nothing
+
+            else
+                Just ( t, matching )
+        )
+        types
+
+
 accountOption : String -> Account -> Html Msg
 accountOption current acct =
     let
@@ -270,67 +313,108 @@ accountOption current acct =
 
 accountSelect : String -> (String -> Msg) -> String -> Html Msg
 accountSelect lbl toMsg current =
-    div []
+    div [ class "field" ]
         [ label [] [ text lbl ]
         , select [ onInput toMsg ]
             (option [ value "", selected (current == "") ] [ text "-- pick --" ]
-                :: List.map (accountOption current) accounts
+                :: List.map
+                    (\( t, accts ) ->
+                        optgroup [ attribute "label" (accountTypeName t) ]
+                            (List.map (accountOption current) accts)
+                    )
+                    accountGroups
             )
         ]
 
 
+progress : Model -> Html Msg
+progress model =
+    let
+        total =
+            List.length transactions
+
+        done =
+            total - List.length model.remaining
+    in
+    small [ class "progress" ]
+        [ text (String.fromInt (done + 1) ++ " / " ++ String.fromInt total) ]
+
+
 view : Model -> Html Msg
 view model =
-    case model.remaining of
-        [] ->
-            div []
-                [ h2 [] [ text "Done!" ]
-                , p []
-                    [ text
-                        ("Score: "
-                            ++ String.fromInt model.score
-                            ++ " / "
-                            ++ String.fromInt model.total
-                        )
+    div [ class "container" ]
+        [ h1 [ class "title" ] [ text "Hamburger Lanes" ]
+        , case model.remaining of
+            [] ->
+                div [ class "card done" ]
+                    [ h2 [] [ text "Done!" ]
+                    , p [ class "score" ]
+                        [ text
+                            (String.fromInt model.score
+                                ++ " / "
+                                ++ String.fromInt model.total
+                            )
+                        ]
+                    , button [ class "btn btn-secondary", onClick ClearAll ] [ text "Start Over" ]
                     ]
-                , button [ onClick ClearAll ] [ text "Clear Correct Answers" ]
-                ]
 
-        txn :: _ ->
-            div []
-                [ h2 [] [ text (txn.date ++ ": " ++ txn.description) ]
-                , case model.feedback of
-                    Nothing ->
-                        div []
-                            [ accountSelect "Debit: " SelectDebit model.selectedDebit
-                            , accountSelect "Credit: " SelectCredit model.selectedCredit
-                            , div []
-                                [ label [] [ text "Amount: $" ]
-                                , input [ type_ "text", value model.enteredAmount, onInput EnterAmount ] []
+            txn :: _ ->
+                div [ class "card" ]
+                    [ progress model
+                    , h2 [ class "description" ] [ text (txn.date ++ ": " ++ txn.description) ]
+                    , case model.feedback of
+                        Nothing ->
+                            div [ class "form" ]
+                                [ accountSelect "Debit" SelectDebit model.selectedDebit
+                                , accountSelect "Credit" SelectCredit model.selectedCredit
+                                , div [ class "field" ]
+                                    [ label [] [ text "Amount" ]
+                                    , input
+                                        [ type_ "text"
+                                        , value model.enteredAmount
+                                        , onInput EnterAmount
+                                        , placeholder "0.00"
+                                        ]
+                                        []
+                                    ]
+                                , button [ class "btn", onClick Submit ] [ text "Submit" ]
                                 ]
-                            , button [ onClick Submit ] [ text "Submit" ]
-                            ]
 
-                    Just correct ->
-                        div []
-                            [ p []
-                                [ text
-                                    (if correct then
-                                        "Correct!"
+                        Just correct ->
+                            div [ class "feedback" ]
+                                [ p
+                                    [ class
+                                        (if correct then
+                                            "result correct"
 
-                                     else
-                                        "Not correct. Answer: Debit "
-                                            ++ accountName txn.debitAccount
-                                            ++ ", Credit "
-                                            ++ accountName txn.creditAccount
-                                            ++ ", "
-                                            ++ formatCents txn.amount
-                                    )
+                                         else
+                                            "result incorrect"
+                                        )
+                                    ]
+                                    [ text
+                                        (if correct then
+                                            "Correct!"
+
+                                         else
+                                            "Not correct."
+                                        )
+                                    ]
+                                , if not correct then
+                                    p [ class "answer" ]
+                                        [ text "Answer: "
+                                        , span [ class "answer-detail" ] [ text (accountName txn.debitAccount) ]
+                                        , text " / "
+                                        , span [ class "answer-detail" ] [ text (accountName txn.creditAccount) ]
+                                        , text (" for " ++ formatCents txn.amount)
+                                        ]
+
+                                  else
+                                    text ""
+                                , button [ class "btn", onClick Next ] [ text "Next" ]
                                 ]
-                            , button [ onClick Next ] [ text "Next" ]
-                            ]
-                , button [ onClick ClearAll ] [ text "Clear Correct Answers" ]
-                ]
+                    , button [ class "btn btn-link", onClick ClearAll ] [ text "Clear Correct Answers" ]
+                    ]
+        ]
 
 
 main : Program Decode.Value Model Msg
