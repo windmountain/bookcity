@@ -1,11 +1,27 @@
-module Main exposing (main)
+port module Main exposing (main)
 
 import Browser
 import ChartOfAccounts exposing (Account, accounts)
+import Dict exposing (Dict)
 import Html exposing (Html, button, div, h2, input, label, option, p, select, text)
 import Html.Attributes exposing (selected, type_, value)
 import Html.Events exposing (onClick, onInput)
+import Json.Decode as Decode
+import Json.Encode as Encode
 import JanuaryTransactions exposing (Transaction, transactions)
+
+
+port saveAnswer : Encode.Value -> Cmd msg
+
+
+port clearAnswers : () -> Cmd msg
+
+
+type alias SavedAnswer =
+    { debit : String
+    , credit : String
+    , amount : String
+    }
 
 
 type alias Model =
@@ -16,6 +32,7 @@ type alias Model =
     , feedback : Maybe Bool
     , score : Int
     , total : Int
+    , saved : Dict String SavedAnswer
     }
 
 
@@ -25,31 +42,76 @@ type Msg
     | EnterAmount String
     | Submit
     | Next
+    | ClearAll
 
 
-init : Model
-init =
-    { remaining = transactions
-    , selectedDebit = ""
-    , selectedCredit = ""
-    , enteredAmount = ""
-    , feedback = Nothing
-    , score = 0
-    , total = 0
-    }
+txnKey : Transaction -> String
+txnKey txn =
+    txn.date ++ ": " ++ txn.description
 
 
-update : Msg -> Model -> Model
+prefill : List Transaction -> Dict String SavedAnswer -> { debit : String, credit : String, amount : String }
+prefill remaining saved =
+    case remaining of
+        txn :: _ ->
+            case Dict.get (txnKey txn) saved of
+                Just answer ->
+                    answer
+
+                Nothing ->
+                    { debit = "", credit = "", amount = "" }
+
+        [] ->
+            { debit = "", credit = "", amount = "" }
+
+
+init : Decode.Value -> ( Model, Cmd msg )
+init flags =
+    let
+        saved =
+            decodeFlags flags
+
+        fields =
+            prefill transactions saved
+    in
+    ( { remaining = transactions
+      , selectedDebit = fields.debit
+      , selectedCredit = fields.credit
+      , enteredAmount = fields.amount
+      , feedback = Nothing
+      , score = 0
+      , total = 0
+      , saved = saved
+      }
+    , Cmd.none
+    )
+
+
+decodeFlags : Decode.Value -> Dict String SavedAnswer
+decodeFlags flags =
+    Decode.decodeValue
+        (Decode.dict
+            (Decode.map3 SavedAnswer
+                (Decode.field "debit" Decode.string)
+                (Decode.field "credit" Decode.string)
+                (Decode.field "amount" Decode.string)
+            )
+        )
+        flags
+        |> Result.withDefault Dict.empty
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
         SelectDebit val ->
-            { model | selectedDebit = val }
+            ( { model | selectedDebit = val }, Cmd.none )
 
         SelectCredit val ->
-            { model | selectedCredit = val }
+            ( { model | selectedCredit = val }, Cmd.none )
 
         EnterAmount val ->
-            { model | enteredAmount = val }
+            ( { model | enteredAmount = val }, Cmd.none )
 
         Submit ->
             case model.remaining of
@@ -66,8 +128,31 @@ update msg model =
 
                         correct =
                             debitCorrect && creditCorrect && amountCorrect
+
+                        ( newSaved, cmd ) =
+                            if correct then
+                                let
+                                    key =
+                                        txnKey txn
+
+                                    answer =
+                                        SavedAnswer model.selectedDebit model.selectedCredit model.enteredAmount
+                                in
+                                ( Dict.insert key answer model.saved
+                                , saveAnswer
+                                    (Encode.object
+                                        [ ( "key", Encode.string key )
+                                        , ( "debit", Encode.string model.selectedDebit )
+                                        , ( "credit", Encode.string model.selectedCredit )
+                                        , ( "amount", Encode.string model.enteredAmount )
+                                        ]
+                                    )
+                                )
+
+                            else
+                                ( model.saved, Cmd.none )
                     in
-                    { model
+                    ( { model
                         | feedback = Just correct
                         , score =
                             model.score
@@ -78,24 +163,50 @@ update msg model =
                                     0
                                   )
                         , total = model.total + 1
-                    }
+                        , saved = newSaved
+                      }
+                    , cmd
+                    )
 
                 [] ->
-                    model
+                    ( model, Cmd.none )
 
         Next ->
             case model.remaining of
                 _ :: rest ->
-                    { model
+                    let
+                        fields =
+                            prefill rest model.saved
+                    in
+                    ( { model
                         | remaining = rest
-                        , selectedDebit = ""
-                        , selectedCredit = ""
-                        , enteredAmount = ""
+                        , selectedDebit = fields.debit
+                        , selectedCredit = fields.credit
+                        , enteredAmount = fields.amount
                         , feedback = Nothing
-                    }
+                      }
+                    , Cmd.none
+                    )
 
                 [] ->
-                    model
+                    ( model, Cmd.none )
+
+        ClearAll ->
+            let
+                fields =
+                    { debit = "", credit = "", amount = "" }
+            in
+            ( { remaining = transactions
+              , selectedDebit = fields.debit
+              , selectedCredit = fields.credit
+              , enteredAmount = fields.amount
+              , feedback = Nothing
+              , score = 0
+              , total = 0
+              , saved = Dict.empty
+              }
+            , clearAnswers ()
+            )
 
 
 parseCents : String -> Maybe Int
@@ -147,10 +258,14 @@ formatCents cents =
         ++ String.padLeft 2 '0' (String.fromInt remainder)
 
 
-accountOption : Account -> Html Msg
-accountOption acct =
-    option [ value (String.fromInt acct.number) ]
-        [ text (String.fromInt acct.number ++ " - " ++ acct.name) ]
+accountOption : String -> Account -> Html Msg
+accountOption current acct =
+    let
+        val =
+            String.fromInt acct.number
+    in
+    option [ value val, selected (current == val) ]
+        [ text (val ++ " - " ++ acct.name) ]
 
 
 accountSelect : String -> (String -> Msg) -> String -> Html Msg
@@ -159,7 +274,7 @@ accountSelect lbl toMsg current =
         [ label [] [ text lbl ]
         , select [ onInput toMsg ]
             (option [ value "", selected (current == "") ] [ text "-- pick --" ]
-                :: List.map accountOption accounts
+                :: List.map (accountOption current) accounts
             )
         ]
 
@@ -178,6 +293,7 @@ view model =
                             ++ String.fromInt model.total
                         )
                     ]
+                , button [ onClick ClearAll ] [ text "Clear Correct Answers" ]
                 ]
 
         txn :: _ ->
@@ -213,13 +329,15 @@ view model =
                                 ]
                             , button [ onClick Next ] [ text "Next" ]
                             ]
+                , button [ onClick ClearAll ] [ text "Clear Correct Answers" ]
                 ]
 
 
-main : Program () Model Msg
+main : Program Decode.Value Model Msg
 main =
-    Browser.sandbox
+    Browser.element
         { init = init
         , update = update
+        , subscriptions = \_ -> Sub.none
         , view = view
         }
