@@ -13,7 +13,7 @@ type alias Transaction =
 transactions : List Transaction
 transactions =
     [ Transaction "Jan 1"
-        "Owner puts up $150,000 in cash to open Hamburger Lanes"
+        "Owner puts up $150,000 in cash to open Keystone Lanes"
         1010
         3010
         15000000

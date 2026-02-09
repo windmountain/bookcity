@@ -368,7 +368,7 @@ view : Model -> Html Msg
 view model =
     div [ class "container" ]
         [ header []
-            [ h1 [ class "title" ] [ text "Hamburger Lanes" ] ]
+            [ h1 [ class "title" ] [ text "Keystone Lanes" ] ]
         , main_ []
             [ case model.remaining of
                 [] ->
