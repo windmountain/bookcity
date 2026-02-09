@@ -3,7 +3,7 @@ port module Main exposing (main)
 import Browser
 import ChartOfAccounts exposing (Account, AccountType(..), accounts)
 import Dict exposing (Dict)
-import Html exposing (Html, button, div, h1, h2, input, label, optgroup, option, p, select, small, span, text)
+import Html exposing (Html, button, div, footer, h1, h2, header, input, label, main_, optgroup, option, p, select, small, span, text)
 import Html.Attributes exposing (attribute, class, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Json.Decode as Decode
@@ -33,6 +33,7 @@ type alias Model =
     , score : Int
     , total : Int
     , saved : Dict String SavedAnswer
+    , missed : List Transaction
     }
 
 
@@ -42,6 +43,7 @@ type Msg
     | EnterAmount String
     | Submit
     | Next
+    | Retry
     | ClearAll
 
 
@@ -82,6 +84,7 @@ init flags =
       , score = 0
       , total = 0
       , saved = saved
+      , missed = []
       }
     , Cmd.none
     )
@@ -164,6 +167,12 @@ update msg model =
                                   )
                         , total = model.total + 1
                         , saved = newSaved
+                        , missed =
+                            if correct then
+                                model.missed
+
+                            else
+                                model.missed ++ [ txn ]
                       }
                     , cmd
                     )
@@ -191,19 +200,34 @@ update msg model =
                 [] ->
                     ( model, Cmd.none )
 
-        ClearAll ->
+        Retry ->
             let
                 fields =
-                    { debit = "", credit = "", amount = "" }
+                    prefill model.missed model.saved
             in
+            ( { model
+                | remaining = model.missed
+                , missed = []
+                , selectedDebit = fields.debit
+                , selectedCredit = fields.credit
+                , enteredAmount = fields.amount
+                , feedback = Nothing
+                , score = 0
+                , total = 0
+              }
+            , Cmd.none
+            )
+
+        ClearAll ->
             ( { remaining = transactions
-              , selectedDebit = fields.debit
-              , selectedCredit = fields.credit
-              , enteredAmount = fields.amount
+              , selectedDebit = ""
+              , selectedCredit = ""
+              , enteredAmount = ""
               , feedback = Nothing
               , score = 0
               , total = 0
               , saved = Dict.empty
+              , missed = []
               }
             , clearAnswers ()
             )
@@ -343,77 +367,99 @@ progress model =
 view : Model -> Html Msg
 view model =
     div [ class "container" ]
-        [ h1 [ class "title" ] [ text "Hamburger Lanes" ]
-        , case model.remaining of
-            [] ->
-                div [ class "card done" ]
-                    [ h2 [] [ text "Done!" ]
-                    , p [ class "score" ]
-                        [ text
-                            (String.fromInt model.score
-                                ++ " / "
-                                ++ String.fromInt model.total
-                            )
+        [ header []
+            [ h1 [ class "title" ] [ text "Hamburger Lanes" ] ]
+        , main_ []
+            [ case model.remaining of
+                [] ->
+                    div [ class "card done" ]
+                        [ h2 [] [ text "Done!" ]
+                        , p [ class "score" ]
+                            [ text
+                                (String.fromInt model.score
+                                    ++ " / "
+                                    ++ String.fromInt model.total
+                                )
+                            ]
+                        , if List.isEmpty model.missed then
+                            p [] [ text "Perfect score!" ]
+
+                          else
+                            button [ class "btn", onClick Retry ]
+                                [ text
+                                    ("Retry "
+                                        ++ String.fromInt (List.length model.missed)
+                                        ++ " missed"
+                                    )
+                                ]
                         ]
-                    , button [ class "btn btn-secondary", onClick ClearAll ] [ text "Start Over" ]
-                    ]
 
-            txn :: _ ->
-                div [ class "card" ]
-                    [ progress model
-                    , h2 [ class "description" ] [ text (txn.date ++ ": " ++ txn.description) ]
-                    , case model.feedback of
-                        Nothing ->
-                            div [ class "form" ]
-                                [ accountSelect "Debit" SelectDebit model.selectedDebit
-                                , accountSelect "Credit" SelectCredit model.selectedCredit
-                                , div [ class "field" ]
-                                    [ label [] [ text "Amount" ]
-                                    , input
-                                        [ type_ "text"
-                                        , value model.enteredAmount
-                                        , onInput EnterAmount
-                                        , placeholder "0.00"
+                txn :: _ ->
+                    div [ class "card" ]
+                        [ progress model
+                        , h2 [ class "description" ] [ text (txn.date ++ ": " ++ txn.description) ]
+                        , case model.feedback of
+                            Nothing ->
+                                div [ class "form" ]
+                                    [ accountSelect "Debit" SelectDebit model.selectedDebit
+                                    , accountSelect "Credit" SelectCredit model.selectedCredit
+                                    , div [ class "field" ]
+                                        [ label [] [ text "Amount" ]
+                                        , input
+                                            [ type_ "text"
+                                            , value model.enteredAmount
+                                            , onInput EnterAmount
+                                            , placeholder "0.00"
+                                            ]
+                                            []
                                         ]
-                                        []
+                                    , button [ class "btn", onClick Submit ] [ text "Submit" ]
                                     ]
-                                , button [ class "btn", onClick Submit ] [ text "Submit" ]
-                                ]
 
-                        Just correct ->
-                            div [ class "feedback" ]
-                                [ p
-                                    [ class
-                                        (if correct then
-                                            "result correct"
+                            Just correct ->
+                                div [ class "feedback" ]
+                                    [ p
+                                        [ class
+                                            (if correct then
+                                                "result correct"
 
-                                         else
-                                            "result incorrect"
-                                        )
-                                    ]
-                                    [ text
-                                        (if correct then
-                                            "Correct!"
-
-                                         else
-                                            "Not correct."
-                                        )
-                                    ]
-                                , if not correct then
-                                    p [ class "answer" ]
-                                        [ text "Answer: "
-                                        , span [ class "answer-detail" ] [ text (accountName txn.debitAccount) ]
-                                        , text " / "
-                                        , span [ class "answer-detail" ] [ text (accountName txn.creditAccount) ]
-                                        , text (" for " ++ formatCents txn.amount)
+                                             else
+                                                "result incorrect"
+                                            )
                                         ]
+                                        [ text
+                                            (if correct then
+                                                "Correct!"
 
-                                  else
-                                    text ""
-                                , button [ class "btn", onClick Next ] [ text "Next" ]
-                                ]
-                    , button [ class "btn btn-link", onClick ClearAll ] [ text "Clear Correct Answers" ]
-                    ]
+                                             else
+                                                "Not correct."
+                                            )
+                                        ]
+                                    , if not correct then
+                                        div [ class "answer" ]
+                                            [ p []
+                                                [ text "Debit: "
+                                                , span [ class "answer-detail" ] [ text (accountName txn.debitAccount) ]
+                                                ]
+                                            , p []
+                                                [ text "Credit: "
+                                                , span [ class "answer-detail" ] [ text (accountName txn.creditAccount) ]
+                                                ]
+                                            , p []
+                                                [ text "Amount: "
+                                                , span [ class "answer-detail" ] [ text (formatCents txn.amount) ]
+                                                ]
+                                            ]
+
+                                      else
+                                        text ""
+                                    , button [ class "btn", onClick Next ] [ text "Next" ]
+                                    ]
+                        ]
+            ]
+        , footer []
+            [ button [ class "btn btn-secondary", onClick ClearAll ] [ text "Clear Correct Answers" ]
+            ]
         ]
 
 
