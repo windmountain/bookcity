@@ -1,20 +1,38 @@
 port module Main exposing (main)
 
 import Browser
-import ChartOfAccounts exposing (Account, AccountType(..), accounts)
 import Dict exposing (Dict)
 import Html exposing (Html, button, div, footer, h1, h2, header, input, label, main_, optgroup, option, p, select, small, span, text)
 import Html.Attributes exposing (attribute, class, placeholder, selected, type_, value)
 import Html.Events exposing (onClick, onInput)
 import Json.Decode as Decode
 import Json.Encode as Encode
-import JanuaryTransactions exposing (Transaction, transactions)
+import KeystoneLanes.ChartOfAccounts as KLA exposing (Account, AccountType(..))
+import KeystoneLanes.Transactions as KLT exposing (Transaction)
 
 
 port saveAnswer : Encode.Value -> Cmd msg
 
 
 port clearAnswers : () -> Cmd msg
+
+
+type alias Business =
+    { id : String
+    , name : String
+    , accounts : List Account
+    , transactions : List Transaction
+    }
+
+
+businesses : List Business
+businesses =
+    [ { id = "keystone-lanes"
+      , name = "Keystone Lanes"
+      , accounts = KLA.accounts
+      , transactions = KLT.transactions
+      }
+    ]
 
 
 type alias SavedAnswer =
@@ -24,8 +42,14 @@ type alias SavedAnswer =
     }
 
 
+type Page
+    = ChoosingBusiness
+    | Playing Business
+
+
 type alias Model =
-    { remaining : List Transaction
+    { page : Page
+    , remaining : List Transaction
     , selectedDebit : String
     , selectedCredit : String
     , enteredAmount : String
@@ -38,7 +62,9 @@ type alias Model =
 
 
 type Msg
-    = SelectDebit String
+    = ChooseBusiness Business
+    | BackToList
+    | SelectDebit String
     | SelectCredit String
     | EnterAmount String
     | Submit
@@ -47,16 +73,16 @@ type Msg
     | ClearAll
 
 
-txnKey : Transaction -> String
-txnKey txn =
-    txn.date ++ ": " ++ txn.description
+txnKey : Business -> Transaction -> String
+txnKey business txn =
+    business.id ++ ":" ++ txn.date ++ ": " ++ txn.description
 
 
-prefill : List Transaction -> Dict String SavedAnswer -> { debit : String, credit : String, amount : String }
-prefill remaining saved =
+prefill : Business -> List Transaction -> Dict String SavedAnswer -> { debit : String, credit : String, amount : String }
+prefill business remaining saved =
     case remaining of
         txn :: _ ->
-            case Dict.get (txnKey txn) saved of
+            case Dict.get (txnKey business txn) saved of
                 Just answer ->
                     answer
 
@@ -69,21 +95,15 @@ prefill remaining saved =
 
 init : Decode.Value -> ( Model, Cmd msg )
 init flags =
-    let
-        saved =
-            decodeFlags flags
-
-        fields =
-            prefill transactions saved
-    in
-    ( { remaining = transactions
-      , selectedDebit = fields.debit
-      , selectedCredit = fields.credit
-      , enteredAmount = fields.amount
+    ( { page = ChoosingBusiness
+      , remaining = []
+      , selectedDebit = ""
+      , selectedCredit = ""
+      , enteredAmount = ""
       , feedback = Nothing
       , score = 0
       , total = 0
-      , saved = saved
+      , saved = decodeFlags flags
       , missed = []
       }
     , Cmd.none
@@ -104,9 +124,46 @@ decodeFlags flags =
         |> Result.withDefault Dict.empty
 
 
+startBusiness : Business -> Dict String SavedAnswer -> Model
+startBusiness business saved =
+    let
+        fields =
+            prefill business business.transactions saved
+    in
+    { page = Playing business
+    , remaining = business.transactions
+    , selectedDebit = fields.debit
+    , selectedCredit = fields.credit
+    , enteredAmount = fields.amount
+    , feedback = Nothing
+    , score = 0
+    , total = 0
+    , saved = saved
+    , missed = []
+    }
+
+
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        ChooseBusiness business ->
+            ( startBusiness business model.saved, Cmd.none )
+
+        BackToList ->
+            ( { page = ChoosingBusiness
+              , remaining = []
+              , selectedDebit = ""
+              , selectedCredit = ""
+              , enteredAmount = ""
+              , feedback = Nothing
+              , score = 0
+              , total = 0
+              , saved = model.saved
+              , missed = []
+              }
+            , Cmd.none
+            )
+
         SelectDebit val ->
             ( { model | selectedDebit = val }, Cmd.none )
 
@@ -117,120 +174,141 @@ update msg model =
             ( { model | enteredAmount = val }, Cmd.none )
 
         Submit ->
-            case model.remaining of
-                txn :: _ ->
-                    let
-                        debitCorrect =
-                            model.selectedDebit == String.fromInt txn.debitAccount
+            case model.page of
+                Playing business ->
+                    case model.remaining of
+                        txn :: _ ->
+                            let
+                                debitCorrect =
+                                    model.selectedDebit == String.fromInt txn.debitAccount
 
-                        creditCorrect =
-                            model.selectedCredit == String.fromInt txn.creditAccount
+                                creditCorrect =
+                                    model.selectedCredit == String.fromInt txn.creditAccount
 
-                        amountCorrect =
-                            parseCents model.enteredAmount == Just txn.amount
+                                amountCorrect =
+                                    parseCents model.enteredAmount == Just txn.amount
 
-                        correct =
-                            debitCorrect && creditCorrect && amountCorrect
+                                correct =
+                                    debitCorrect && creditCorrect && amountCorrect
 
-                        ( newSaved, cmd ) =
-                            if correct then
-                                let
-                                    key =
-                                        txnKey txn
+                                ( newSaved, cmd ) =
+                                    if correct then
+                                        let
+                                            key =
+                                                txnKey business txn
 
-                                    answer =
-                                        SavedAnswer model.selectedDebit model.selectedCredit model.enteredAmount
-                                in
-                                ( Dict.insert key answer model.saved
-                                , saveAnswer
-                                    (Encode.object
-                                        [ ( "key", Encode.string key )
-                                        , ( "debit", Encode.string model.selectedDebit )
-                                        , ( "credit", Encode.string model.selectedCredit )
-                                        , ( "amount", Encode.string model.enteredAmount )
-                                        ]
-                                    )
-                                )
+                                            answer =
+                                                SavedAnswer model.selectedDebit model.selectedCredit model.enteredAmount
+                                        in
+                                        ( Dict.insert key answer model.saved
+                                        , saveAnswer
+                                            (Encode.object
+                                                [ ( "key", Encode.string key )
+                                                , ( "debit", Encode.string model.selectedDebit )
+                                                , ( "credit", Encode.string model.selectedCredit )
+                                                , ( "amount", Encode.string model.enteredAmount )
+                                                ]
+                                            )
+                                        )
 
-                            else
-                                ( model.saved, Cmd.none )
-                    in
-                    ( { model
-                        | feedback = Just correct
-                        , score =
-                            model.score
-                                + (if correct then
-                                    1
+                                    else
+                                        ( model.saved, Cmd.none )
+                            in
+                            ( { model
+                                | feedback = Just correct
+                                , score =
+                                    model.score
+                                        + (if correct then
+                                            1
 
-                                   else
-                                    0
-                                  )
-                        , total = model.total + 1
-                        , saved = newSaved
-                        , missed =
-                            if correct then
-                                model.missed
+                                           else
+                                            0
+                                          )
+                                , total = model.total + 1
+                                , saved = newSaved
+                                , missed =
+                                    if correct then
+                                        model.missed
 
-                            else
-                                model.missed ++ [ txn ]
-                      }
-                    , cmd
-                    )
+                                    else
+                                        model.missed ++ [ txn ]
+                              }
+                            , cmd
+                            )
 
-                [] ->
+                        [] ->
+                            ( model, Cmd.none )
+
+                ChoosingBusiness ->
                     ( model, Cmd.none )
 
         Next ->
-            case model.remaining of
-                _ :: rest ->
+            case model.page of
+                Playing business ->
+                    case model.remaining of
+                        _ :: rest ->
+                            let
+                                fields =
+                                    prefill business rest model.saved
+                            in
+                            ( { model
+                                | remaining = rest
+                                , selectedDebit = fields.debit
+                                , selectedCredit = fields.credit
+                                , enteredAmount = fields.amount
+                                , feedback = Nothing
+                              }
+                            , Cmd.none
+                            )
+
+                        [] ->
+                            ( model, Cmd.none )
+
+                ChoosingBusiness ->
+                    ( model, Cmd.none )
+
+        Retry ->
+            case model.page of
+                Playing business ->
                     let
                         fields =
-                            prefill rest model.saved
+                            prefill business model.missed model.saved
                     in
                     ( { model
-                        | remaining = rest
+                        | remaining = model.missed
+                        , missed = []
                         , selectedDebit = fields.debit
                         , selectedCredit = fields.credit
                         , enteredAmount = fields.amount
                         , feedback = Nothing
+                        , score = 0
+                        , total = 0
                       }
                     , Cmd.none
                     )
 
-                [] ->
+                ChoosingBusiness ->
                     ( model, Cmd.none )
 
-        Retry ->
-            let
-                fields =
-                    prefill model.missed model.saved
-            in
-            ( { model
-                | remaining = model.missed
-                , missed = []
-                , selectedDebit = fields.debit
-                , selectedCredit = fields.credit
-                , enteredAmount = fields.amount
-                , feedback = Nothing
-                , score = 0
-                , total = 0
-              }
-            , Cmd.none
-            )
-
         ClearAll ->
-            ( { remaining = transactions
-              , selectedDebit = ""
-              , selectedCredit = ""
-              , enteredAmount = ""
-              , feedback = Nothing
-              , score = 0
-              , total = 0
-              , saved = Dict.empty
-              , missed = []
-              }
-            , clearAnswers ()
-            )
+            case model.page of
+                Playing business ->
+                    ( { model
+                        | remaining = business.transactions
+                        , selectedDebit = ""
+                        , selectedCredit = ""
+                        , enteredAmount = ""
+                        , feedback = Nothing
+                        , score = 0
+                        , total = 0
+                        , saved = Dict.empty
+                        , missed = []
+                      }
+                    , clearAnswers ()
+                    )
+
+                ChoosingBusiness ->
+                    ( model, Cmd.none )
 
 
 parseCents : String -> Maybe Int
@@ -258,9 +336,9 @@ parseCents str =
             Nothing
 
 
-accountName : Int -> String
-accountName number =
-    accounts
+accountName : List Account -> Int -> String
+accountName accts number =
+    accts
         |> List.filter (\a -> a.number == number)
         |> List.head
         |> Maybe.map .name
@@ -304,8 +382,8 @@ accountTypeName t =
             "Expenses"
 
 
-accountGroups : List ( AccountType, List Account )
-accountGroups =
+accountGroups : List Account -> List ( AccountType, List Account )
+accountGroups accts =
     let
         types =
             [ Asset, ContraAsset, Liability, Equity, Revenue, Expense ]
@@ -314,7 +392,7 @@ accountGroups =
         (\t ->
             let
                 matching =
-                    List.filter (\a -> a.accountType == t) accounts
+                    List.filter (\a -> a.accountType == t) accts
             in
             if List.isEmpty matching then
                 Nothing
@@ -335,40 +413,70 @@ accountOption current acct =
         [ text (val ++ " - " ++ acct.name) ]
 
 
-accountSelect : String -> (String -> Msg) -> String -> Html Msg
-accountSelect lbl toMsg current =
+accountSelect : List Account -> String -> (String -> Msg) -> String -> Html Msg
+accountSelect accts lbl toMsg current =
     div [ class "field" ]
         [ label [] [ text lbl ]
         , select [ onInput toMsg ]
             (option [ value "", selected (current == "") ] [ text "-- pick --" ]
                 :: List.map
-                    (\( t, accts ) ->
+                    (\( t, groupAccts ) ->
                         optgroup [ attribute "label" (accountTypeName t) ]
-                            (List.map (accountOption current) accts)
+                            (List.map (accountOption current) groupAccts)
                     )
-                    accountGroups
+                    (accountGroups accts)
             )
         ]
 
 
-progress : Model -> Html Msg
-progress model =
+progressBar : Business -> Model -> Html Msg
+progressBar business model =
     let
-        total =
-            List.length transactions
+        txnCount =
+            List.length business.transactions
 
         done =
-            total - List.length model.remaining
+            txnCount - List.length model.remaining
     in
     small [ class "progress" ]
-        [ text (String.fromInt (done + 1) ++ " / " ++ String.fromInt total) ]
+        [ text (String.fromInt (done + 1) ++ " / " ++ String.fromInt txnCount) ]
 
 
 view : Model -> Html Msg
 view model =
+    case model.page of
+        ChoosingBusiness ->
+            viewBusinessList
+
+        Playing business ->
+            viewGame business model
+
+
+viewBusinessList : Html Msg
+viewBusinessList =
     div [ class "container" ]
         [ header []
-            [ h1 [ class "title" ] [ text "Keystone Lanes" ] ]
+            [ h1 [ class "title" ] [ text "Journal Entry Practice" ] ]
+        , main_ []
+            (List.map viewBusinessCard businesses)
+        ]
+
+
+viewBusinessCard : Business -> Html Msg
+viewBusinessCard business =
+    button [ class "card business-card", onClick (ChooseBusiness business) ]
+        [ h2 [] [ text business.name ]
+        , small [] [ text (String.fromInt (List.length business.transactions) ++ " transactions") ]
+        ]
+
+
+viewGame : Business -> Model -> Html Msg
+viewGame business model =
+    div [ class "container" ]
+        [ header []
+            [ button [ class "btn-back", onClick BackToList ] [ text "\u{2190} All Businesses" ]
+            , h1 [ class "title" ] [ text business.name ]
+            ]
         , main_ []
             [ case model.remaining of
                 [] ->
@@ -396,13 +504,13 @@ view model =
 
                 txn :: _ ->
                     div [ class "card" ]
-                        [ progress model
+                        [ progressBar business model
                         , h2 [ class "description" ] [ text (txn.date ++ ": " ++ txn.description) ]
                         , case model.feedback of
                             Nothing ->
                                 div [ class "form" ]
-                                    [ accountSelect "Debit" SelectDebit model.selectedDebit
-                                    , accountSelect "Credit" SelectCredit model.selectedCredit
+                                    [ accountSelect business.accounts "Debit" SelectDebit model.selectedDebit
+                                    , accountSelect business.accounts "Credit" SelectCredit model.selectedCredit
                                     , div [ class "field" ]
                                         [ label [] [ text "Amount" ]
                                         , input
@@ -439,11 +547,11 @@ view model =
                                         div [ class "answer" ]
                                             [ p []
                                                 [ text "Debit: "
-                                                , span [ class "answer-detail" ] [ text (accountName txn.debitAccount) ]
+                                                , span [ class "answer-detail" ] [ text (accountName business.accounts txn.debitAccount) ]
                                                 ]
                                             , p []
                                                 [ text "Credit: "
-                                                , span [ class "answer-detail" ] [ text (accountName txn.creditAccount) ]
+                                                , span [ class "answer-detail" ] [ text (accountName business.accounts txn.creditAccount) ]
                                                 ]
                                             , p []
                                                 [ text "Amount: "
